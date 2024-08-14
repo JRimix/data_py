@@ -1,0 +1,64 @@
+-- Use Py to upload file to SQL and call the Sp
+import os
+import time
+import logging
+import pyodbc  # or another SQL Server connector library
+
+# Configuration
+WATCHED_DIRECTORY = '/path/to/watched/directory'
+DATABASE_URL = 'mssql+pyodbc://username:password@hostname/dbname?driver=ODBC+Driver+17+for+SQL+Server'
+
+# Set up logging
+logging.basicConfig(filename='file_importer.log', level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Database setup
+conn_str = DATABASE_URL
+conn = pyodbc.connect(conn_str)
+
+# File processing function
+def process_file(file_path):
+    logging.info(f"Processing file: {file_path}")
+    
+    try:
+        with open(file_path, 'rb') as file:
+            file_content = file.read()
+        
+        file_name = os.path.basename(file_path)
+        
+        # Call stored procedure
+        cursor = conn.cursor()
+        cursor.execute("""
+            EXEC InsertAndProcessFile ?, ?
+            """, (file_name, file_content))
+        conn.commit()
+        
+        logging.info(f"Successfully uploaded and processed {file_path}.")
+    
+    except Exception as e:
+        logging.error(f"Failed to process file {file_path}: {e}")
+
+# Event handler class
+class FileEventHandler(FileSystemEventHandler):
+    def on_created(self, event):
+        if not event.is_directory:
+            process_file(event.src_path)
+
+# Main function to set up directory watcher
+def main():
+    event_handler = FileEventHandler()
+    observer = Observer()
+    observer.schedule(event_handler, path=WATCHED_DIRECTORY, recursive=False)
+    observer.start()
+    
+    logging.info("Started watching directory for new files.")
+    
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        observer.stop()
+    observer.join()
+
+if __name__ == "__main__":
+    main()
